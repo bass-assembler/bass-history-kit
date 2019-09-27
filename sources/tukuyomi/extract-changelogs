@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+import datetime
+import re
+import sys
+import textwrap
+
+HEADER_RE = re.compile(r"""
+    ^
+    # Almost every header in the input starts with a date and a dash
+    (
+        (?P<date>\d\d\d\d-\d\d-\d\d)
+        \s*
+        -
+        \s*
+    )?
+
+    # Then we have have a filename containing the program name and version.
+    (?P<version>
+        # All filenames begin with the name
+        bass_v
+
+        # The version identifier in a filename may only be a simple one,
+        # without spaces or dots.
+        [A-Za-z0-9_]*
+
+    )
+
+    # Sometimes we have miscellaneous trailing text like "(source only)"
+    .*
+    $
+""", re.VERBOSE)
+
+
+def split_changelog_entries(handle):
+    header = None
+    body = ""
+
+    for line in handle:
+        if line.startswith("_"):
+            ignorable = (
+                header in {"bass by byuu\n", "\n"}
+            )
+            if not ignorable:
+                yield (header, body)
+            header = None
+            body = ""
+
+        elif header is None:
+            header = line
+
+        else:
+            body += line
+
+    yield (header, body)
+
+
+def parse_changelog_entries(entries):
+    earliest_date = datetime.datetime.now(tz=datetime.timezone.utc)
+
+    for (header, changelog) in entries:
+        if header == "2012-03-?? - bass_v06r01.tar.bz2 (source code)\n":
+            # Inspecting the v06r01 tarball, the latest timestamp on any file
+            # is 2012-03-14, so that's a reasonable guess for the release date.
+            print(
+                "Synthesizing release date for bass_v06r01",
+                file=sys.stderr,
+            )
+            header = "2012-03-14 - bass_v06r01.tar.bz2\n"
+
+        elif header == "2012-08-24 -\n":
+            # The release announcement for bass v08 doesn't mention a filename,
+            # but we can guess what it was.
+            print(
+                "Reconstructing filename for bass_v08",
+                file=sys.stderr,
+            )
+            header = "2012-08-24 - bass_v08.tar.xz\n"
+            changelog = changelog.replace("Posted bass v08.\n", "")
+
+        elif header == "2012-09-03 -\n":
+            # The release announcement for bass v08r01 doesn't mention a
+            # filename, but we can guess what it was.
+            print(
+                "Reconstructing filename for bass_v08r01",
+                file=sys.stderr,
+            )
+            header = "2012-09-03 - bass_v08r01.tar.xz\n"
+            changelog = changelog.replace(
+                "I've posted bass v08r01 (v08.01)\n",
+                "",
+            )
+
+        m = HEADER_RE.match(header)
+        if not m:
+            print("Unrecognised header line:", repr(header), file=sys.stderr)
+            continue
+
+        date = m.group("date")
+        if date is not None:
+            # We can get full second-resolution timestamps from release
+            # archives, and we want to use the same precision everywhere, so
+            # let's just assume midnight.
+            date = datetime.datetime.fromisoformat(
+                date.replace(" ", "-") + "T00:00:00+00:00"
+            )
+
+        if date is None:
+            print("No date in header:", header, file=sys.stderr)
+            continue
+
+        if date > earliest_date:
+            print(
+                "Ignoring changelog out of chronological order",
+                version,
+                file=sys.stderr,
+            )
+            continue
+
+        version = m.group("version")
+        if version is None:
+            print("No version in header:", header, file=sys.stderr)
+            continue
+
+        yield (date, version, changelog)
+
+        earliest_date = date
+
+
+def main(args):
+    with open(args[1]) as handle:
+        raw_entries = split_changelog_entries(handle)
+        entries = list(parse_changelog_entries(raw_entries))
+
+        # The tukuyomi changelog is in reverse chronological order, but we want
+        # to process changes chronologically. Although we have date-stamps,
+        # sometimes multiple things occur on the same day, so just sorting by
+        # the date will not provide the results we want. Instead, we reverse
+        # the list in memory.
+        for date, version, changelog in reversed(entries):
+            changelog_path = version + ".changelog"
+            print(date.isoformat(), version, changelog_path)
+
+            with open(changelog_path, "w") as changelog_handle:
+                changelog_handle.write(changelog)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
