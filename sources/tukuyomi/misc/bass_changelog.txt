@@ -1,0 +1,1093 @@
+bass by byuu
+
+________________________________________________________________________________
+2013-05-09 - bass_v11r07.tar.xz (binaries included)
+Okay, this should be pretty much finished now. I'm out of ideas on useful things to add or change.
+I'll certainly be very interested to see what kind of evil can be dreamed up with the new power.
+I'd appreciate if people could stress test it, look for bugs, etc. If all looks good, I'll post this as v12, which should be stable for a while.
+________________________________________________________________________________
+2013-05-07 - bass_v11r06.tar.xz
+Parsing should be even faster now, thanks to small-string-optimization.
+Macro arguments are now referenced as {#argument}, and local macros and labels can be created with the # prefix as well.
+Escape sequences have been added, so you can express more text:
+Code:
+	define '\n' 0xff
+	db "Hero of time,\n", "face me!\0"
+With that, I pretty much had to move print to not auto-append a line-feed character.
+Fixed skeud's reported issue (thanks for the heads up.)
+The last thing I'd like to look at before finalizing on bass v12 is macro arguments.
+It would be really nice to let a macro argument be a macro that gets evaluated later, and then provide the option to evaluate it immediately with {eval ...}, but pulling that off is easier said that done. It's not the way evaluation works at all, so it'd have to be special cased and inconsistent with the rest of the system.
+________________________________________________________________________________
+2013-05-05 - bass_v11r04.tar.xz
+This release should get bass as fast as it's ever going to get.
+nall::string now supports empty strings, size+capacity (can seek to end of string in O(1) time), and copy-on-write semantics.
+Macros have also been overhauled one last time. We are back to only one type of macro evaluation, yet the recursion remains. I've added the "return" statement that can be specified within macros to specify what a macro should be substituted with in its parent block invocation. Macro evaluation also now starts with the deepest macro first, which allows macros to accept macros as arguments once again.
+The end result is, in my opinion, quite elegant. At least compared to what was necessary before.
+Code:
+	macro add x,y
+	return {eval {self::x} + {self::y}}
+	endmacro
+
+	macro factorial n
+	if {self::n} == 1
+		return 1
+	else
+		return {eval {self::n} * {factorial {eval {self::n} - 1}}}
+	endif
+	endmacro
+
+	macro echo text
+	print {self::text}
+	endmacro
+
+	main:
+	print "{add {add 1,2}, {add 3,4}}! = {factorial 10}"
+	{echo "hello, world!"}
+I'm still not a huge fan of "{self::*}", but I'm hard-pressed to think of any alternatives. The only symbols I have left that can be used as a shortcut for "self::" are ` and @, both of which are hideous. Note that whatever we use has to work for both macros and labels, so that's why we can't just use eg $. That would collide with eval() trying to parse it as a hex value.
+eval is also a necessary evil. Not all return results can be evaluated, such as the "echo" example. Attempting to auto-evaluate a string would end badly. Plus there may be times when you want to return "number+number" instead of "eval(number+number)"
+Here I could reduce it slightly, eg:
+Code:
+	return {={self::x}+{self::y}}
+	vs
+	return {eval {self::x}+{self::y}}
+Not sure whether terseness or expressiveness is better in this case, and I'm not going to offer both.
+This would be the terse alternative:
+Code:
+	macro add x,y
+	return {={@x} + {@y}}
+	endmacro
+
+	macro factorial n
+	if {@n} == 1
+		return 1
+	else
+		return {={@n} * {factorial {={@n} - 1}}}
+	endif
+	endmacro
+
+	macro echo text
+	print {@text}
+	endmacro
+
+	main:
+	print "{add {add 1,2}, {add 3,4}}! = {factorial 10}"
+	{echo "hello, world!"}
+________________________________________________________________________________
+2013-04-22 - bass_v11r02.tar.xz
+Implemented red-black trees with O(log n) insert/remove/search as nall::set.
+Labels and Macros now use nall::set instead of nall::vector.
+The internal release name for bass v12 is hereby "striped bass" :)
+________________________________________________________________________________
+2013-04-17 - bass_v11r01.tar.xz
+So this is an attempt to extend bass to be more than just a cross-assembler.
+The idea being that we can use custom archs to perform DSL tasks. Not really sure what I have in mind just yet, though.
+"-o output" is now an optional command-line argument. Attempting to write to a file that isn't opened will produce an error.
+There is also the new "output "filename", mode" directive. "mode" is optional (it can be create or modify, defaults to the command-line setting: -overwrite ? create : modify)
+So with this, you can use "bass file.asm", and have the ASM file specify which file to write to. Or if you want, which files.
+I also added the "constant" directive, which creates labels. You can use them to create labels for functions inside a binary you are modifying, or you can use them for static, read-only computation. You cannot redefine them. They are to labels as defines are to macros, basically.
+Code:
+	lda addr,x  //lda $208000,x
+	constant base $200000
+	constant addr base + $8000
+	if addr == $208000; ...; endif  //be careful, the first pass won't know the value of addr until it has been declared
+________________________________________________________________________________
+2013-04-16 - bass_v11.tar.xz
+bass v11 has been released. Conditional support per above was re-added.
+I'm really happy with bass at this point. Extremely clean syntax, elegant recursion, very fast.
+Changelog:
+Macros are now evaluated in their own context, rather than by expanding the current block to contain additional blocks. The self namespace was added to allow macro defines and labels to not shadow the global namespace. The incbinas directive was added to make obtaining the size of included binaries easier. Support for printing expressions as both decimal and hex values was added. The namespace directive now has a matching endnamespace directive for recursion. Other changes have occurred as well.
+________________________________________________________________________________
+2013-04-15 - bass_v10r01.tar.xz
+So, the way macros expanded on the current line, and pushed the blocks out in-place, was quite arcane.
+I've gutted macro support to improve things. Now, "{foo}" as a block is counted as a full-fledged macro, and its source is passed to recursive assembleSource() function (which assembleFile() also uses for incsrc recursion.) Code such as "lda {foo}" uses define mode, which will no longer expand to additional blocks, so you can't define foo as "#$55; nop" and expect that to work.
+The compelling advantage of this is sane support for labels and macros inside of macros. The "self" namespace now exists within macros, which let you access macro arguments in isolation of global macros, and the same for labels. Example:
+Code:
+	macro clear value
+	//you could say push namespace; namespace self; ...; pull namespace if you wanted to omit self::
+	//but then global variables would need namespace prefixes, so ... up to you
+	lda #{self::value}
+	self::loop:
+		stz $2180
+		dec; bne self::loop
+	endmacro
+In this case, "{self::value}" evaluates to #{macroRecursionDepth}::value, and "self::loop" evaluates to #{macroExpansionCounter}::loop. In other words, you can call the clear macro more than once, or recurse on the clear macro more than once, and the names will no longer shadow the global namespace macros and labels.
+With this, I've done away with {#}, as it's no longer necessary. I've also added {hex macro/label}, which is useful with print to display hexadecimal values.
+...
+Major caveat for this release is that conditional assembly is currently broken due to the macro changes. Going to be a bitch to get that working again :(
+________________________________________________________________________________
+2013-01-16 - bass_v10.tar.xz
+Came up with a macro expansion that works in O(n) time. Unfortunately it's not super fast. A ten-line macro recursion needs about one second per 10,000 iterations. That's honestly to be expected with vector growth and manual string parsing and evaluation with every pass, with no caching of tokens or anything. Was still hoping it'd be a bit better, but oh well. Works out to about 100,000 lines of code parsed per second. Compared to v09.02's evaluator though, it's far faster. 1 second vs 16 seconds for the 10K iterations, and 100K would basically never complete thanks to quadratic growth.
+________________________________________________________________________________
+2013-01-12 - bass_v09r02.tar.xz
+This release adds tdc and tcd aliases for tda and tad.
+It also reworks the expression evaluation. We now have evalBlock() to pull out a single block from one or more statements, and evalMacros() has been modified to work with this. activeLine was added to keep track of all the blocks on the current line, and evaluate them one at a time.
+With these changes, macro expansion can occur inside the block parser, so we can now peek ahead and evaluate elseif {macro} statements when we are not inside a macro declaration and we are still capable of matching (eg not already matched) on the current condition level.
+For right now, activeLine is a vector, meaning that inserting new blocks is an O(n) operation, meaning that recursive macro usage will expand at O(n^2). Not great. I need to write a linkedlist class, at which point I can insert at O(1), allowing for O(n) macro expansion, and we can then discard previously evaluated blocks to keep memory usage low. Anyway, it's only a problem if you expect to recurse inside macros more than a hundred thousand times or so.
+If you guys can please test macros + conditions nested in weird patterns to look for bugs, that'd be greatly appreciated.
+Once we confirm this latest change is working, I'll go ahead and release bass v10.
+________________________________________________________________________________
+2013-01-04 - bass_v09r01.tar.xz
+Changelog:
+* fixed sty.b *08
+* fixed -case-insensitive mode (ignore ' and " inside comments)
+* throw error if output file cannot be opened for writing
+* unmatched conditions will not expand macros; allows for recursive macro support
+* macro arguments can be evaluated pre-expansion via {eval name}; example {macro {eval name}}
+* push, pull uses a true FIFO stack now
+* push, pull now supports: pc (origin + base combined), origin, base, namespace, label, "string"
+________________________________________________________________________________
+2012-09-03 -
+I've posted bass v08r01 (v08.01)
+This version adds two things. First, you can create empty defines now:
+Code:
+	define x
+The value of x is null, so "lda #${x}00" will evaluate to "lda #$00". Only useful for the second addition:
+Code:
+	if {defined x} || {defined y}; db $00; endif
+{defined name} will evaluate to "1" if there is a define or macro (argument count does not matter) that matches the requested name, or "0" otherwise.
+Thanks to Cydrak for the idea.
+________________________________________________________________________________
+2012-08-24 -
+Posted bass v08.
+Fixed +/- relative branches (can't share them under the same concept, that was so obvious in retrospect, sigh.)
+Added document on the arch targets.
+Added ".b" and ".w" suffixes to the SNES CPU+SMP tables (only on instructions where there could possibly be ambiguities.)
+Basically on: (op).(b,w) #...; (op).(b,w,l) addr,x; (op).(b,w,l) addr.
+So at this point, it's basically your choice whether to use lda.b #0 or lda #<0.
+You can also make your own defines to help:
+Code:
+	define b .b
+	define word >
+	lda{b} #0
+	lda #{word}0
+This is basically me conceding that I can't think of a perfect solution for all cases.
+The most important reason for the <0, >0 size stuff is for archs with multiple operand instructions (for future support.)
+________________________________________________________________________________
+2012-03-?? - bass_v06r01.tar.bz2 (source code)
+bass now has a table-based arch that allows defining custom instruction sets in text form; while retaining the same speed as the hand-coded archs that existed previously (~100KB/s assembly.)
+Furthermore, it has the unique ability to append new instructions to the table during assembly. This allows one to potentially even build entire architectures by utilizing bass' intrinsic recursive macro support.
+The SNES S-CPU and S-SMP modules have been re-written to use table-based modules as a result. Note that the Bass core can still be extended for architectures that are too complex for table-based instruction sets.
+EDIT: made these changes to the S-SMP table.
+bnz *08=*08 -> bne --*08=*08
+bnz y=*08 -> bne --y=*08
+lda (x)+ -> lda (x++)
+sta (x)+ -> sta (x++)
+Prefix/postfix matches the actual opcode behavior.
+________________________________________________________________________________
+2012-03-12 - bass_v06.tar.bz2
+Changelog:
+defaults to -arch=table if no arch specified
+can now declare macros with command-line arguments
+major speedup by eliminating an O(n^2) edge case in substr()
+fixed bugs in smp-canonical arch [kipernal]
+________________________________________________________________________________
+2012-03-02 - bass_v05r04.tar.bz2 (source only)
+At last, got it. You can now define a macro based on a condition, or a condition inside of a macro.
+If you get stupid and try nesting them too deeply, I don't know if it will work or not. But the code is getting too complex for me to fix it if it doesn't work. My mind can only keep track of so many variables at one time.
+Code:
+	arch snes.cpu
+
+	define styleA 1
+
+	if {styleA} == 1
+	macro read data
+	db {data},{data}
+	endmacro
+	else
+	macro read data
+	db {data}
+	endmacro
+	endif
+
+	macro write data
+	if {data} == 1
+	db {data}
+	else
+	db $bb
+	endif
+	endmacro
+
+	org $0000; fill $8000
+	org $0000
+	if {styleA} == 1
+	db $ff
+	elseif {styleA} == 1
+	db $ee
+	endif
+
+	{read $12}
+	{write 1}
+
+	//writes $ff,$12,$12,$01
+________________________________________________________________________________
+2012-01-08 - bass_v05r02.tar.bz2 (source code + Linux binary only)
+If this could be tested, that'd be great. It fixes the strlcpy() O(n^2) performance problem, and adds -benchmark so you can see how fast it is yourself :D
+________________________________________________________________________________
+2011-11-14 - bass_v05.tar.bz2
+________________________________________________________________________________
+2011-11-13 - bass_v04r06.tar.bz2 (source only)
+This will probably be the last WIP before v05 official, so if anyone wants to test the table stuff, now'd be the time.
+I'm not ever going to guarantee backward-compatibility with tables between releases, but I'll only have to change the syntax to address short-comings, so now's the time.
+I've taken advantage of C++11 raw string literals to embed pre-made archs into the core, but you can of course load your own from text files.
+Long-term, I think it'd be kinda cool to allow appending to the arch table by hand. This will allow you to build archs by utilizing Bass::Core's recursive macro/define system, and to add your own pseudo-ops (clc; adc = add, etc.)
+I've fixed up the repeat syntax, and added one more absolute data mode to the table. Cleaned up the table parser code as well.
+I've benchmarked the assembly speed between the original parsers and the table-driven variants: 200KB assembles in one second on both, and 1MB takes 17 seconds (part of the string parser has quadratic growth, apparently. All the overhead is in the pre-parsing phase, so hopefully I can eliminate that in the future.) Since they're the same speed, I'll probably be removing the hand-made ones. Will leave the SMP canonical for now since it has the "expected" mnemonics. Amusingly, table+CPU+SMP is still smaller code-wise than just native CPU or just native SMP by themselves.
+I've performed some final revisions to my S-SMP syntax, and I'll be rewriting bsnes' SMP core to use the new mnemonics. Below is the completed S-SMP table:
+(first and last lines aren't needed for .arch files, but are used to allow #include "file.arch" when compiling bass.)
+Code:
+	arch(snes_smp) = R"(
+
+	nop              ;$00
+	brk              ;$0f
+	rts              ;$6f
+	rti              ;$7f
+	xcn              ;$9f
+	wai              ;$ef
+	stp              ;$ff
+
+	clp              ;$20
+	clc              ;$60
+	cli              ;$c0
+	clv              ;$e0
+	sep              ;$40
+	sec              ;$80
+	sei              ;$a0
+	cmc              ;$ed
+
+	php              ;$0d
+	pha              ;$2d
+	phx              ;$4d
+	phy              ;$6d
+	plp              ;$8e
+	pla              ;$ae
+	plx              ;$ce
+	ply              ;$ee
+
+	inx              ;$3d
+	iny              ;$fc
+	dex              ;$1d
+	dey              ;$dc
+
+	tax              ;$5d
+	tay              ;$fd
+	tsx              ;$9d
+	txa              ;$7d
+	txs              ;$bd
+	tya              ;$dd
+
+	mul              ;$cf
+	div              ;$9e
+
+	das              ;$be
+	daa              ;$df
+
+	jst *04          ;=a %0001
+	set *08:*03      ;=b %00010 =a
+	clr *08:*03      ;=b %10010 =a
+	bbs *08:*03=*08  ;=b %00011 =a +3c
+	bbc *08:*03=*08  ;=b %10011 =a +3c
+
+	jmp (*16,x)      ;$1f =a
+	jmp *16          ;$5f =a
+	jsr *16          ;$3f =a
+	jsp *08          ;$4f =a
+
+	bne *08,x=*08    ;$de =a +3b
+	bne *08=*08      ;$2e =a +3b
+	bnz y=*08        ;$fe +2a
+	bnz *08=*08      ;$6e =a +3b
+
+	bra *08          ;$2f +2a
+	bpl *08          ;$10 +2a
+	bmi *08          ;$30 +2a
+	bvc *08          ;$50 +2a
+	bvs *08          ;$70 +2a
+	bcc *08          ;$90 +2a
+	bcs *08          ;$b0 +2a
+	bne *08          ;$d0 +2a
+	beq *08          ;$f0 +2a
+
+	tsb *16          ;$0e =a
+	trb *16          ;$4e =a
+
+	inw *08          ;$3a =a
+	dew *08          ;$1a =a
+	adw *08          ;$7a =a
+	sbw *08          ;$9a =a
+	cpw *08          ;$5a =a
+	ldw *08          ;$ba =a
+	stw *08          ;$da =a
+
+	orc !*13:*03     ;$2a ~b ~a
+	orc *13:*03      ;$0a ~b ~a
+	and !*13:*03     ;$6a ~b ~a
+	and *13:*03      ;$4a ~b ~a
+	eor *13:*03      ;$8a ~b ~a
+	ldc *13:*03      ;$aa ~b ~a
+	stc *13:*03      ;$ca ~b ~a
+	not *13:*03      ;$ea ~b ~a
+
+	ora (x)          ;$06
+	orr (x)=(y)      ;$19
+	ora (*08,x)      ;$07 =a
+	ora (*08),y      ;$17 =a
+	ora #*08         ;$08 =a
+	orr *08=#*08     ;$18 =b =a
+	ora *16,x        ;$15 =a
+	ora *16,y        ;$16 =a
+	ora *08,x        ;$14 =a
+	orr *08=*08      ;$09 =b =a
+	ora *16          ;$05 =a
+	ora *08          ;$04 =a
+
+	and (x)          ;$26
+	and (x)=(y)      ;$39
+	and (*08,x)      ;$27 =a
+	and (*08),y      ;$37 =a
+	and #*08         ;$28 =a
+	and *08=#*08     ;$38 =b =a
+	and *16,x        ;$35 =a
+	and *16,y        ;$36 =a
+	and *08,x        ;$34 =a
+	and *08=*08      ;$29 =b =a
+	and *16          ;$25 =a
+	and *08          ;$24 =a
+
+	eor (x)          ;$46
+	eor (x)=(y)      ;$59
+	eor (*08,x)      ;$47 =a
+	eor (*08),y      ;$57 =a
+	eor #*08         ;$48 =a
+	eor *08=#*08     ;$58 =b =a
+	eor *16,x        ;$55 =a
+	eor *16,y        ;$56 =a
+	eor *08,x        ;$54 =a
+	eor *08=*08      ;$49 =b =a
+	eor *16          ;$45 =a
+	eor *08          ;$44 =a
+
+	cmp (x)          ;$66
+	cmp (x)=(y)      ;$79
+	cmp (*08,x)      ;$67 =a
+	cmp (*08),y      ;$77 =a
+	cmp #*08         ;$68 =a
+	cmp *08=#*08     ;$78 =b =a
+	cmp *16,x        ;$75 =a
+	cmp *16,y        ;$76 =a
+	cmp *08,x        ;$74 =a
+	cmp *08=*08      ;$69 =b =a
+	cmp *16          ;$65 =a
+	cmp *08          ;$64 =a
+
+	adc (x)          ;$86
+	adc (x)=(y)      ;$99
+	adc (*08,x)      ;$87 =a
+	adc (*08),y      ;$97 =a
+	adc #*08         ;$88 =a
+	adc *08=#*08     ;$98 =b =a
+	adc *16,x        ;$95 =a
+	adc *16,y        ;$96 =a
+	adc *08,x        ;$94 =a
+	adc *08=*08      ;$89 =b =a
+	adc *16          ;$85 =a
+	adc *08          ;$84 =a
+
+	sbc (x)          ;$a6
+	sbc (x)=(y)      ;$b9
+	sbc (*08,x)      ;$a7 =a
+	sbc (*08),y      ;$b7 =a
+	sbc #*08         ;$a8 =a
+	sbc *08=#*08     ;$b8 =b =a
+	sbc *16,x        ;$b5 =a
+	sbc *16,y        ;$b6 =a
+	sbc *08,x        ;$b4 =a
+	sbc *08=*08      ;$a9 =b =a
+	sbc *16          ;$a5 =a
+	sbc *08          ;$a4 =a
+
+	sta (x)          ;$c6
+	sta (x)+         ;$af
+	sta (*08,x)      ;$c7 =a
+	sta (*08),y      ;$d7 =a
+	str *08=#*08     ;$8f =b =a
+	sta *16,x        ;$d5 =a
+	sta *16,y        ;$d6 =a
+	sta *08,x        ;$d4 =a
+	str *08=*08      ;$fa =b =a
+	sta *16          ;$c5 =a
+	sta *08          ;$c4 =a
+
+	stx *08,y        ;$d9 =a
+	stx *16          ;$c9 =a
+	stx *08          ;$d8 =a
+
+	sty *08,x        ;$db =a
+	sty *16          ;$cc =a
+	sty *08          ;$cb =a
+
+	lda (x)          ;$e6
+	lda (x)+         ;$bf
+	lda (*08,x)      ;$e7 =a
+	lda (*08),y      ;$f7 =a
+	lda #*08         ;$e8 =a
+	lda *16,x        ;$f5 =a
+	lda *16,y        ;$f6 =a
+	lda *08,x        ;$f4 =a
+	lda *16          ;$e5 =a
+	lda *08          ;$e4 =a
+
+	ldx #*08         ;$cd =a
+	ldx *08,y        ;$f9 =a
+	ldx *16          ;$e9 =a
+	ldx *08          ;$f8 =a
+
+	ldy #*08         ;$8d =a
+	ldy *08,x        ;$fb =a
+	ldy *16          ;$ec =a
+	ldy *08          ;$eb =a
+
+	cpx #*08         ;$c8 =a
+	cpx *16          ;$1e =a
+	cpx *08          ;$3e =a
+
+	cpy #*08         ;$ad =a
+	cpy *16          ;$5e =a
+	cpy *08          ;$7e =a
+
+	asl              ;$1c
+	asl *08,x        ;$1b =a
+	asl *16          ;$0c =a
+	asl *08          ;$0b =a
+
+	lsr              ;$5c
+	lsr *08,x        ;$5b =a
+	lsr *16          ;$4c =a
+	lsr *08          ;$4b =a
+
+	rol              ;$3c
+	rol *08,x        ;$3b =a
+	rol *16          ;$2c =a
+	rol *08          ;$2b =a
+
+	ror              ;$7c
+	ror *08,x        ;$7b =a
+	ror *16          ;$6c =a
+	ror *08          ;$6b =a
+
+	inc              ;$bc
+	inc *08,x        ;$bb =a
+	inc *16          ;$ac =a
+	inc *08          ;$ab =a
+
+	dec              ;$9c
+	dec *08,x        ;$9b =a
+	dec *16          ;$8c =a
+	dec *08          ;$8b =a
+
+	)";
+________________________________________________________________________________
+2011-11-12 - bass_v04r05.tar.bz2 (source only)
+Added a table for the SNES S-SMP (SPC700) processor. This uses my new-style syntax, but I'm making both the CPU+SMP use the "lda addr,x" style syntax instead of "lda addr+x" syntax.
+As a result, for the S-SMP, I had to use = for argument separators, eg "and $08=$09" ($08 &= $09)
+I really think that it should be "lda addr+x", but pretty much 100% of 6502 and 65816 programmers use "lda addr,x", so that's what we'll do.
+SPC700 is rare, and I'm redefining the syntax either way, so this should be fine.
+The table assembler syntax has proven to be quite capable now, but I do still have a few plans to extend it further.
+It's also possible to inherit the table assembler and then add on to it for really tricky things (like ARM7 push/pop argument lists), if one wanted to do that (I'm not going to.)
+________________________________________________________________________________
+2011-11-11 - bass_v04r04.tar.bz2 (source only)
+Added a new architecture, which I'm just calling "table" for lack of a better name (suggestions welcome.)
+Basically, it lets you load in "arch" files that declare instruction sets. And in fact, you can load in multiple arch specs in one pass, so CPU+SMP code in the same file will be possible once again.
+I was using something close to table-driven, but I was handling the parsing for each addressing mode by hand.
+With this new version, each table entry takes a list that tells you how to assemble the data.
+You can actually write individual bits at a time, which is necessary for some of the SMP and Cx4 instructions.
+Basically, relationships that are too complex to represent in one entry just need more than one.
+For instance, adc #$0000 and adc #$00. Store one for each mode.
+One of the nice things of the new parser is that you can have spaces inside the evaluated part, eg "lda #3 * (5 + 2)"
+Amusingly, the table parser + complete 65816 instruction set is <12KB of code, whereas the plain 65816 module by itself was 20KB of code.
+I still need to write the SMP table, so for now only the CPU table can be tested.
+The table assembler is just an arch, so it inherits from the Bass core just like any other arch. This will allow us to still add specialty archs for platforms where a table is just never going to be versatile enough (hi, x86/amd64.)
+The most important part of building a table is that the order of entries is also the order of evaluation.
+lda (*,x) must come before lda (*), which must come before lda *. Otherwise, the latter will match the former pairs.
+________________________________________________________________________________
+2011-10-14 - bass_v04r02.tar.bz2 (source only)
+Updated to GCC 4.6 with range-for and the like.
+Also, now that the new bsnes is out, I can release my updates to nall/vector and nall/string (too risky to change vector behavior near the end of a WIP cycle.)
+nall/string gains lstring string::(i)(q)split(const char *key). This transforms the old:
+lstring part;
+part.split(",", block);
+Into the nicer:
+lstring part = block.split(",");
+Less ambiguity, and no performance penalty thanks to C++11 move semantics. Also one line shorter.
+Basically, nall/vector now acts like std::vector, in that it throws exceptions instead of allocating new objects when using operator[] out of bounds.
+The main advantage of this is that you can make a vector of objects that lack a no-argument constructor.
+The main disadvantage is that using operator[] can crash your program.
+I've added operator(unsigned position, const T& data), which will return the data at position, or if out of bounds, data instead.
+This gives us: string data = part(1, ""); //give me part[1] or "" if it doesn't exist.
+The big concern is that if I've missed any string[n] assumed-"" cases in bass, the assembler will throw an exception and crash.
+I'd appreciate if anyone could test this thoroughly to make sure it's stable. Once confirmed, I intend to extend snes-cpu to use "," or "+", and kill off snes-cpu-canonical. (only difference at that point will be using <>^ instead of .b .w .l)
+________________________________________________________________________________
+2011-08-01 - bass_v04r01.tar.bz2 (Windows binaries + source code included)
+Fourth time's a charm?
+This release should fix an issue with the isbyte/isword/islong closures. It also creates a new category that I'm calling intrinsics: built-in macros with special meanings. The +/- relative label stuff is now bound to it as well, for instance:
+Code:
+	mapper lorom
+	org $8000; fill $8000
+
+	org $8000; base $c000
+	  -; bra {-1}
+	  -; bra {-2}
+	  -; bra {-3}
+	  bra {+1}; +
+	  bra {+2}; +
+	  bra {+3}; +
+
+	  -; stz $55aa
+	  ?; stz $55aa
+	  ~; stz $55aa
+
+	  bra {-3}
+	  bra {-2}
+	  bra {-1}
+	  bra {-}
+
+	  bra {+}
+	  bra {+1}
+	  bra {+2}
+	  bra {+3}
+
+	  ~; stz $55aa
+	  ?; stz $55aa
+	  +; stz $55aa
+
+	  print "PC: {origin} [{pc}]"
+	  jmp {pc}
++ and - now both evaluate using the same relative label index counter, meaning they are functionally identical.
+I only kept + and - because it can make it clearer whether you intend a label to be jumped back to or forward to.
+I've also added ? and ~ as alternate ways to declare anonymous labels.
+Consider them temporary, I just want to see what people think. At best, I'll only keep one. At worst, I'll remove both.
+I was also weighing whether clarity or non-shadowing is better for the intrinsics. Eg:
+{pc} could be {$}, and {origin} could be {@}. In this way, there is no problem if the user tries:
+define pc value; define origin value
+However, it is less clear:
+if {$}>=0xc000; error "out of range"; endif
+Although I suppose the user could do:
+define pc {$}
+if {pc}>=0xc000; ...
+Thoughts?
+-----
+EDIT: okay, removed ?, I will keep ~, - and +. Converted {pc} to {$}, and {origin} to {@}. This means that all intrinsics are automatically reserved and will never conflict with legal user defines/macros.
+[I don't actually stop you from creating eg macro !#@$@ざけんなよ、パーサー！！#^$%&(&*), but you really shouldn't do that :P]
+________________________________________________________________________________
+2011-07-31 - bass_v03.tar.bz2 (Windows binary + source code included)
+This has all of the changes from the v02 thread, and adds one new thing:
+You can seek back two -/+ labels with "bra --; bra ++"; and three with "bra ---; bra +++"
+Unlike xkas, you don't create a -- label, you just have two - labels in a row.
+There's also documentation in the doc/ folder now that explains all features.
+It may have some minor errors, but should be mostly correct.
+Thanks go to Chester and Screwtape for helping to polish this release.
+________________________________________________________________________________
+2011-07-30 - bass_v02r11.tar.bz2 (source only)
+Adds updated size detection code to snes-cpu and snes-smp.
+I also gave up on the x86 assembler. The ISA is just too insanely bloated and complex. Made it to opcode 0xa4 at least (~35% sans FPU/MMX/SSE*.)
+Gave up after hitting AccumulatorOffset vs RegisterEffective. How can you tell the difference between these two?
+mov eax,[eax] or mov eax,[bx+si]
+mov eax,[label]
+You have to basically try decoding both completely, and on error go to the next one.
+No simple wildcards. Not even regular expressions would practically do the job, they'd be 4,000+ bytes long per regex.
+And even then, there are dozens of cases where the exact same instruction can be encoded two different ways.
+There are lots of these with the accumulator, eg add eax,eax can be one byte, or it can be multi-byte ala add eax,ebx.
+The whole design of having a table of opcodes to run through just isn't practical on this ISA.
+It seems the only way to do it would be to have a list along the lines of:
+string name;
+vector<vector<type>> operand;
+Run through the opcode, and every , counts as a separate operand.
+Each operand would get a list of "possible" modes that it could represent:
+* can be accumulator
+* can be register
+* can be offset
+* can be effective
+* can be ptr:offset
+For many of these, you'd need additional information. Eg lea eax,[eax] is fine, ala RegisterEffective encoding. But lea eax,eax is not, even though that's a valid encoding for it, so we subdivide more: can be effectiveAddress ( [eax], [eax+ebp*8+disp8] ), can be effectiveRegister ( eax ), etc. Then there are the types for the ModR/M encoding: is the register from the 32-bit set? (eax, ebx, ecx ...) Or from the 16-bit set? (ax, bx, cx, ...) Or from the MMX set? (xmm0, xmm1, ...) How about effective addressing? Is it 32-bit? ([eax]) 16-bit? ([bx+si])
+Once done, you'd basically need a huge function that qualifies every possibility, one by one. And this would have to be manually sorted to pick the shorter encodings when possible, rather than in the structure of a table. I don't even think a resorted table could pull off some of the edge cases.
+Next, we have the same problem on every arch with not being able to pick minimal sizes of operands, but with x86 it's really, really bad to mess this up.
+jmp byte is 2 bytes vs jmp dword being 5.
+nasm and yasm are infinite-pass assemblers that keep recoding to pick the minimal forms. bass is not, so you have to manually declare this information.
+This makes them more desirable to use, and the complexity would bog down bass' simplicity.
+Then there's the point that bass is targeted as a binary patcher. But x86 binaries are always in fucked up complicated containers for OS loaders. Windows has PE, Linux has ELF, etc. Without parsing those, you have to do your own address translation via org/base, and have to manually target sections. And assembling your own binary from nothing wouldn't be practical at all (good luck building a PE header by hand.)
+And then there's amd64 extensions. My math parser is 32-bit, as using 64-bit integers for math is a lot slower. I'd have to extend that, and convert every unsigned type to uint64_t or more. Then there's dealing with all the added complexity: REX extensions to the SIB extensions to the ModR/M extensions, etc.
+And lastly the fact that nobody's probably ever going to use it ...
+Well, it was fun to learn how the encoding structure works. I think I can use this knowledge to refine nall/detour, but my initial plan (detour = disassemble + reassemble with bass) was not really practical, as the amount of code necessary to assemble and disassemble x86 is an order of magnitude larger than to do the same for SNES CPU/SMP.
+But honestly even detour.hpp doesn't seem all that useful to work on. I only really ever hook Windows kernel32/user32 functions, and those all have standard WINAPI function prologues already, so the minimalist implementation I have is enough.
+And then there's the matter of how often would I even use it? I rarely hack other applications anymore. It's still a fun idea to eventually do one day, but I'm thinking it doesn't make a lot of sense to do that today. So ... fork this off as part of header-magic's code rather than a part of nall, and call it a day for now.
+That frees me up to post bass v03, and get back to work on bsnes/phoenix stuff.
+________________________________________________________________________________
+2011-07-26 - bass_v02r10.tar.bz2 (source only)
+This has the split/replace speedups to nall/string applied, and it also fixes define ' '.
+________________________________________________________________________________
+2011-07-25 - bass_v02r09.tar.bz2 (source only)
+snes-cpu lda<, lda>, lda^ syntax was broken. Was replacing the symbols with spaces, breaking the wildcard comparisons.
+Still debating whether or not to put them on the operands rather than the opcodes, so I wouldn't suggest writing a lot of code just yet.
+________________________________________________________________________________
+2011-07-21 - bass_v02r08.tar.bz2 (source only)
+Updated the documentation. Defines are now argumentless macros instead of redefinable labels.
+The reason for doing that is because labels are meant to be used before being defined, and thus cannot be redefined later.
+By trying to shoehorn defines onto them for the nicer {}-less syntax, it allows the same undeclared define to go beyond the first pass.
+Anyway, as a bonus for having to use {}, the evaluation happens post-expansion, allowing for the "lda #$00" -> byte-size detection to work, whereas lda #offset's size cannot be determined, as offset has already been evaluated to a raw integer.
+Code:
+	mapper lorom
+	org $8000; fill $8000; org $8000
+
+	macro add n; clc; adc {n}; endmacro
+	macro sub n; sec; sbc {n}; endmacro
+	macro addsub x,y
+	  {add {x}}
+	  {sub {y}}
+	endmacro
+
+	define offset $7efff8 + 8
+	define length $20
+	define 'A' 0x61
+	define 'B' 0x62
+
+	main:
+	  {addsub #$20,#$40}
+	  lda {offset}
+	  {add #{length}}
+	  db "ABCD"
+	  jml main
+
+	if {pc} >= 0x8040
+	  error "Out of space! PC = {pc}"
+	elseif {pc} >= 0x8020
+	  warning "Almost out of space! PC = {pc}"
+	endif
+
+	macro m1 x
+	  macro m2 y
+	    {x} {y}
+	  endmacro
+	endmacro
+
+	{m1 lda}; {m2 #$ff}
+
+	macro test; nop #2; endmacro; {test}
+The last idea I was considering was allowing more than one seek with +/- labels. Before with xas, I used to have +/-/++/--/+++/---. The syntax looked really ugly in code usage, however.
+What I was thinking was that we define them with + and - only, but when evaluating them, allow ++ to mean (go to the second + forward) and -- to mean (go to the second - backward). Stupid example:
+Code:
+	-;
+	  lda {bitpos}; tax
+	  lda $2000,y
+	  -; beq +; lsr; dex; bra -; +
+	  sta $2000,y
+	  dey; bne --
+Agreed? How many should we reasonably allow? I was thinking anything more than three (+++/---) would be insane. I liked the +1 and -2 syntax, but those are also valid integer expressions for the math parser. I'd have to use a unique markup for them (like $ for hex and % for decimal) if we were to evaluate these inside of the math parser's tokenizer. But I don't see a lot of value in that. Only really obvious one would be something like:
+Code:
+	dw ++ - +; +; incbin data.bin; +
+Which is probably better expressed anyway as:
+Code:
+	dw data.end - data; data: incbin data.bin; .end:
+If we wanted the added flexibility, we'd have to use {+} and {-}.
+Code:
+	dw {++} - {+}; +; incbin data.bin; +
+	dw {+2} - {+1}; +; incbin data.bin; +  //this could work too now
+	-; lsr; dex; bne {-}
+Is that worth it? Labels don't really use {} otherwise, so it's a bit unorthodox.
+________________________________________________________________________________
+2011-07-20 - bass_v02r07.tar.bz2 (source only)
+Got it. Updated the core parsing algorithm to be even more powerful, probably resulting in another speed hit though.
+Okay, so now what happens is that for each line, we loop over it like so:
+* expand any macros specified in the FIRST block
+* parse the first block of the line
+* remove the block from the line
+* increment block# counter (for warning/error messages)
+*** repeat until line is empty
+Unrolled, our m1/m2 example looks like this:
+Code:
+	line starts with {m1 lda}; {m2 #$ff}
+	line evals to macro m2 y; lda {y}; endmacro; {m2 #$ff}
+	line becomes  lda {y}; endmacro; {m2 #$ff}
+	assembling block macro m2 y
+	line starts with  lda {y}; endmacro; {m2 #$ff}
+	line evals to  lda {y}; endmacro; {m2 #$ff}
+	line becomes  endmacro; {m2 #$ff}
+	assembling block lda {y}
+	line starts with  endmacro; {m2 #$ff}
+	line evals to  endmacro; {m2 #$ff}
+	line becomes  {m2 #$ff}
+	assembling block endmacro
+	line starts with  {m2 #$ff}
+	line evals to  lda #$ff
+	line becomes  lda #$ff
+	assembling block lda #$ff
+	line finished
+________________________________________________________________________________
+2011-07-20 - bass_v02r06.tar.bz2 (source only)
+Testing would be appreciated this time.
+So, defines now declare values rather than expressions. Macros are now used instead.
+Macros are also parsed after conditionals now, so you can modify macros based on conditions; which to me, is more useful than creating (not using) conditionals inside of macros.
+They lack the specialized single-line form (unless you add endmacro to the end), but are now parsed at the block level.
+As such, macros can be nested. God help us.
+Also added warning and error. print was updated to match their syntax. They only take a single string argument now, and can expand {pc} to the program counter (origin+base). Conditionals can use {pc} as well.
+Lastly, change enqueue pc and dequeue pc to pushpc and pullpc. If we ever need to save/restore something else, we'll update the syntax to be more expressive. Made this change because print pc is no longer valid, so it didn't match syntactically.
+Example file macro.asm:
+Code:
+	mapper lorom
+	org $8000; fill $8000; org $8000
+
+	macro add n; clc; adc {n}; endmacro
+	macro sub n; sec; sbc {n}; endmacro
+	macro addsub x,y
+	  {add {x}}
+	  {sub {y}}
+	endmacro
+
+	define offset $7efff8 + 8
+	define length 32
+	define 'A' 0x61
+	define 'B' 0x62
+
+	main:
+	  {addsub #$20,#$40}
+	  lda^ offset
+	  {add #length}
+	  db "ABCD"
+
+	if {pc} >= 0x8040
+	  error "Out of space! PC = {pc}"
+	elseif {pc} >= 0x8020
+	  warning "Almost out of space! PC = {pc}"
+	endif
+
+	macro m1 x
+	  macro m2 y
+	    {x} {y}
+	    nop #2
+	  endmacro
+	endmacro
+
+	{m1 lda}
+	{m2 #$ff}
+Oh, you'll get a warning if you don't close a macro, or close one that is not opened. Same as with if/endif.
+Now, one major catch here, not sure how to avoid it.
+The way my parser works is that macros can be expanded from one block into one or more blocks.
+Example: {add #$20} is one block, but becomes clc; adc #$20, which is two blocks.
+So what I do is evaluate all macros at the start of each line. So what happens when we try: {m1 lda}; {m2 #$ff} ?
+It becomes: macro m2 y; lda {y}; endmacro; {m2 #$ff}. m2 has not been expanded on this line. So even though we end up declaring m2 before hitting {m2} ... it hasn't been expanded because the expansion process didn't know about it yet.
+I don't have any easy way around this. The only real solution would be something like ... evaluate at the block-level, and further sub-divide each block. This would mean something like a recursive call to assembleBlock. Meaning, we'd be crushing the stack. With a 1MB stack, it wouldn't be too difficult to crash the assembler by nesting a couple hundred of these expansions onto a single line. And there's no way I can stop that.
+It would be far safer for the rule to be: macro declarations must appear on their own lines. But yeah, that's still a restriction that nothing else has.
+________________________________________________________________________________
+2011-07-18 - bass_v02r05.tar.bz2
+Above-mentioned support [1] has been added, and I've also written up some basic documentation in the doc/ folder.
+Nitpick away :P, but note that I don't intend to have some amazing book-length documentation. I expect people using this to know what they are doing.
+I'd like to re-add something akin to xas' warnpc. The idea was that a warning/error would be thrown if the file write position had exceeded a certain value.
+Say you were inserting a script into a ROM that only had 32KB of space for it, and your script was 33KB. This would serve as a warning that you've just crushed part of the ROM.
+I'd like something more verbose this time, though, something like:
+if condition
+warning "Warning text!"
+elseif otherCondition
+error "Error text!"
+endif
+The obvious problem being that there is no way to express the current program counter to the condition clause. So we'd need something like a global-scope specialized define, like {pc}.
+org 0xc08000
+incbin script.bin
+if {pc} >= 0xc10000
+error "SIGTEDWOOLSEY: your script is too big, it just overwrote part of the game code!"
+endif
+Could also just define a label right before the if, but that's not as pretty.
+If we do something like that, it'd make sense to simplify the print command to use it as well. But then I'm a bit afraid of crazy people using {pc} in opcodes, so it'd have to be done only for internal directives.
+You see, it's up to the architecture to determine when to write data. snes-cpu will perform the evaluation before writing the opcode prefix, but x86 does not, due to handling of opcode prefix bytes for it.
+Meh.
+[1] Added nested if/elseif/else/endif support. It operates at the block-level, so they work inside of macros.
+Note that this is for meta-programming / static compilation, eg conditional assemble, ala #ifdef in C.
+It's not a cheap platform-specific mid-level assembly language directive.
+Should be far superior to "rep 0/1" tricks. Will tell you if you forget an endif, or have too many of them.
+Code:
+	mapper lorom
+	org $8000; fill $8000
+	org $8000
+
+	define size = -16
+
+	if 0
+	  if 0
+	    lda #$01
+	  elseif 0
+	    lda #$02
+	  else
+	    lda #$03
+	  endif
+	elseif 1
+	  if 0
+	    lda #$04
+	  elseif 1
+	    lda #$05
+	  else
+	    lda #$06
+	  endif
+	else
+	  if 0
+	    lda #$07
+	  elseif 0
+	    lda #$08
+	  else
+	    lda #$09
+	  endif
+	endif
+	  lda #$0a
+
+	if {size} < 0
+	  lda #$10
+	elseif {size} > 0
+	  lda #$20
+	else
+	  lda #$30
+	endif
+Added add (relative) seek command. It's like skip, but bi-directional.
+Code:
+	db $01,$02; seek -2; db $03,$04
+Will write $03,$04
+Code:
+	db $01,$02; seek 2; db $03,$04
+Will write $01,$02,{skip},{skip},$03,$04.
+Positive seeking should only be done if the data is already filled in, obviously.
+Otherwise, it'll probably end up as 0x00s.
+________________________________________________________________________________
+2011-07-17 - bass_v02r04.tar.bz2
+All opcodes from 0x00-0x81 implemented. I don't know what the difference is between 0x80 and 0x82, ndisasm thinks 0x82 is an invalid opcode in fact.
+imul is now the most fucked opcode of all:
+Code:
+	lock imul eax,[es:ebx*8+ebp+0x01234567],0x89abcdef  //and you thought lda ($addr,s),y was insane
+This is why CISC is bad. I still don't even know what the hell segment selectors do in 32-bit protected mode ...
+Also simplified the addressing modes as much as I could. The ExactSize values can only really apply to immediates, and really only benefit those 8-bit sign-extended values.
+Updated the effective address decoding to validate the operand size when not using indirect addressing.
+Most move instructions in, those were the big ones for hooking. And now I get to figure out the Sreg variants of mov and lea.
+________________________________________________________________________________
+2011-07-15 - bass_v02r03.tar.bz2
+Added arpl opcode to arch=x86.
+Sounds pretty unimpressive for eight hours of work, but yeah. Had to rewrite all opcode parsing, and rethink a ton of stuff to support it.
+Opcodes now take: Mode, Flag, Size (operand0), Size (operand1)
+You can specify exact sizes or implicit sizes. Set is now Byte, Word, Long, Pair { Word, Long }, Quad.
+Mode is now a lot simpler: instead of packing the sizes into it, you just give it the basic mode, eg: EffectiveImmediate instead of EffectiveWordImmediateByte.
+Writing an x86 assembler is serious business.
+________________________________________________________________________________
+2011-07-14 - bass_v02r02.tar.bz2
+x86 code is becoming somewhat presentable, with more and more addressing modes supported. Added a fun implicit sorting for addressing mode order. More powerful than the simple if(a.wildcard(b.pattern)) swap(a, b);
+Started on some basic abstraction to eventually allow for toggling the default word size to 16-bits instead of 32-bits.
+The next stumbling block is on opcode 0x63 - ARPL. It only accepts m16,r16 arguments. All of my routines always allow for both 16-bit and 32-bit, as everything else thus far has been m16/32 and r16/32. Will have to rework more to support it.
+But yeah, x86 assembly is going to be slooooooooooooooooooow given the extreme complexity and ambiguity in the opcodes. Wildcard compares are basically useless (there is no prefix for immediates, for instance), so I have to fall through upon failure for each opcode assemble step, rather than error out like with other cores.
+Not really a huge deal. My goal is to also write an x86 disassembler, and then combine the two for full x86 cross-platform detours, and that's only assembling 5-20 bytes :)
+If it weren't so huge, I'd use it to assemble libco::x86's source code at startup. But bass is far larger than all of libco. Can at least use it for the reference block assembly going forward. But then I'd also need to do so for libco::amd64, and that's ... even more fun.
+________________________________________________________________________________
+2011-07-13 - bass_v02r01.tar.bz2
+Probably 10-15% of x86 opcodes implemented, probably 2,000+ bugs with them.
+________________________________________________________________________________
+2011-07-12 - bass_v02.tar.bz2
+License is GPLv2. Windows and Linux binaries were included, as is complete source code.
+This version supports both S-CPU (65816) and S-SMP (SPC700) architectures, as well as modern alternative implementations for each (which I highly recommend.)
+It also supports unified define->macro support, and optional case-insensitive assembly.
+NOTE: v02 fixes a bug with defines inside of defines, another bug with beq in S-SMP mode, and adds the -overwrite option to always create new files instead of opening existing files in read-write mode.
+________________________________________________________________________________
+2011-07-08 - bass_v00r06.tar.bz2
+All aforementioned changes. All four archs should be 100% completed at this time.
+If anyone can, please test as much as you can, and let me know of any show-stopper issues.
+I'd like to go ahead and release v01 and claim a mostly-stable API.
+________________________________________________________________________________
+2011-07-07 - bass_v00r05.tar.bz2
+Half of the new-style SPC700 opcodes implemented. Really looking nice so far.
+Will likely re-implement the 65816 core using the table syntax.
+________________________________________________________________________________
+2011-07-07 - bass_v00r04.tar.bz2
+Here's my current attempt at table-building:
+Code:
+	bool BassSnesSmp::assembleBlock(const string &block) {
+	  if(Bass::assembleBlock(block) == true) return true;
+
+	  lstring part, byte;
+	  part.split(" ", block);
+	  string name = part[0];
+	  string args = part[1];
+	  signed relative;
+
+	  unsigned size = 0;
+	       if(name.endswith(".b")) { name.rtrim<1>(".b"); size = 1; }
+	  else if(name.endswith(".w")) { name.rtrim<1>(".w"); size = 2; }
+
+	  foreach(f, family) if(args.wildcard(f.pattern)) {
+	    foreach(o, f.opcode) if(name == o.name) {
+	      switch(o.mode) {
+	      case Mode::Implied:
+		write(o.byte);
+		return true;
+	      case Mode::Vector:
+		write(o.byte | (eval(args) << 4));
+		return true;
+	      case Mode::IndirectX:
+		args.ltrim<1>("(");
+		args.rtrim<1>("+x)");
+	      case Mode::Direct:
+		if(!o.priority && size != 1 && !args.wildcard("$??")) break;
+		write(o.byte);
+		write(eval(args));
+		return true;
+	      case Mode::DirectBit:
+		byte.split(".", args);
+		write(o.byte | (eval(byte[1]) << 5));
+		write(eval(byte[0]));
+		return true;
+	      case Mode::DirectBitRelative:
+		part.split(",", args);
+		byte.split(".", part[0]);
+		relative = eval(part[1]) - (pc() + 3);
+		if(relative < -128 || relative > +127) error("branch out of bounds");
+		write(o.byte | (eval(byte[1]) << 5));
+		write(eval(byte[0]));
+		write(relative);
+		return true;
+	      case Mode::Address:
+		if(!o.priority && size != 2 && !args.wildcard("$????")) break;
+		write(o.byte);
+		write(eval(args), 2);
+		return true;
+	      case Mode::DirectXRelative:
+		part.split(",", args);
+		part[0].rtrim<1>("+x");
+		relative = eval(part[1]) - (pc() + 3);
+		if(relative < -128 || relative > +127) error("branch out of bounds");
+		write(o.byte);
+		write(eval(part[0]));
+		write(relative);
+		return true;
+	      }
+	    }
+	  }
+
+	  return false;
+	}
+
+	BassSnesSmp::BassSnesSmp() {
+	  Opcode table[] = {
+	    { 0x00, "nop",  "",      1, Mode::Implied           },
+	    { 0x01, "jsrt", "*",     1, Mode::Vector            },
+	    { 0x02, "set1", "*.*",   1, Mode::DirectBit         },
+	    { 0x03, "bbs1", "*.?,*", 1, Mode::DirectBitRelative },
+	    { 0x04, "or",   "*",     0, Mode::Direct            },
+	    { 0x05, "or",   "*",     1, Mode::Address           },
+	    { 0x06, "or",   "(x)",   1, Mode::Implied           },
+	    { 0x07, "or",   "(*+x)", 1, Mode::IndirectX         },
+	    { 0xde, "cbne", "*+x,*", 1, Mode::DirectXRelative   },
+	  };
+
+	  lstring patterns;
+	  foreach(opcode, table) {
+	    opcode.pattern.replace("*", "?*");
+	    if(!patterns.find(opcode.pattern)) patterns.append(opcode.pattern);
+	  }
+
+	  foreach(x, patterns) {
+	    foreach(y, patterns) {
+	      if(&x != &y && x.wildcard(y)) swap(x, y);
+	    }
+	  }
+
+	  foreach(opcode, table) {
+	    if(auto position = patterns.find(opcode.pattern)) {
+	      family[position()].pattern = opcode.pattern;
+	      family[position()].opcode.append(opcode);
+	    }
+	  }
+	}
+Actually not too bad, honestly.
+________________________________________________________________________________
+2011-07-06 - bass_v00r03.tar.bz2
+Full SPC700 support. Needs to be tested to ensure there are no bugs, but then I'm really not happy with the code anyway.
+Thinking about writing a table builder so that I can order the opcodes from 00-ff and maximize parsing speed. We'll see.
+Also has PC save+restore, and base changes. And everything I did yesterday.
+________________________________________________________________________________
+2011-07-04 - bass_v00r02.tar.bz2
+All of the above mentioned changes, plus 50% of the S-SMP instruction set implemented.
+I am planning to make an alternate mnemonic set for this processor once finished, but of course I'll keep the standard form around as well.
+Example:
+Code:
+	_0x:
+	  nop              //
+	  tcall 0          //jsrt n
+	  set1  $11.0      //
+	  bbs   $11.0,_0x  //bbs0 $11,_0x
+	  or    a,$11      //ora  $nn
+	  or    a,$1122    //ora  $nnnn
+	  or    a,(x)      //ora  (x)
+	  or    a,($11+x)  //ora  ($11,x)
+	  or    a,#$11     //ora  #$11
+	  or    $11,$22    //
+	  or1   c,$1122.0  //or0  $1122
+	  asl   $11        //
+	  asl   $1122      //
+	  push  p          //php
+	  tset  $1122,a    //tset $1122
+	  brk              //
+
+	_1x:
+	  bpl   _1x        //
+	  tcall 1          //jsrt n
+	  clr1  $11.0      //
+	  bbc   $11.0,_1x  //bbc0 $11,_1x
+	  or    a,$11+x    //ora  $11,x
+	  or    a,$1122+x  //ora  $1122,x
+	  or    a,$1122+y  //ora  $1122,y
+	  or    a,($11)+y  //ora  ($11),y
+	  or    $11,#$22   //
+	  or    (x),(y)    //
+	  decw  $11        //
+	  asl   $11+x      //asl  $11,x
+	  asl   a          //asl
+	  dec   x          //dex
+	  cmp   x,$1122    //cpx  $1122
+	  jmp   ($1122+x)  //jmp  ($1122,x)
+________________________________________________________________________________
+2011-06-29 - bass_v00r01.tar.bz2 (source code only!)
+You'll have to compile this one yourself. Didn't feel like booting over to Windows, sorry.
+Install TDM/GCC 4.5 and you're good to go. Run cc.bat and it'll make your EXE.
+________________________________________________________________________________
+2011-06-28 - bass_v00.tar.bz2
+bass (as in treble) is essentially xkas v15+. It's basically a clean rewrite (took seven hours to write), meant to correct design mistakes made from the previous version, clean things up some more, and change some design patterns.
+The syntax is 99% identical to xkas v10+, with the exceptions of missing fillto (complicates things by requiring bidirectional address translation, use fill instead), and loadpc/savepc (may re-add them, but they are redundant thanks to mutable defines.) And of course, to be consistent with bsnes, the "header" option has been removed. Add it yourself if you want it.
+The main internal change is that it now uses C++0x throughout, uses an upgraded RDP that allows custom handling for unrecognized tokens (cuts core size in half), and it no longer tries to merge all supported architectures into a single source file. While it's a nice idea in theory, it makes the arch modules a pain in the ass to write. The new design is based on archs inheriting the Bass class and extending it. This gives more flexibility and results in cleaner code.
+And of course, the compelling reason to upgrade ... it has macro support.
+Given that it's brand new, there's bound to be some evil things you can do to exploit the grammar. I don't care too much about that right now. I'm mainly interested in bugs with what should be legal syntax. Testing help would of course be appreciated :)
+Example:
+Code:
+	mapper lorom
+	org $008000; fill $8000
+
+	define pushall php; rep #$30; pha; phb; phd; phx; phy
+	define pullall rep #$30; ply; plx; pld; plb; pla; plp
+
+	macro square(n)
+	  {n}*{n}
+	endmacro
+
+	macro fill(addr, length, byte)
+	  //you will need to use +/- labels or hard-coded branches for relativity
+	  lda.b #{byte}
+	  ldx.w #{addr}
+	  ldy.w #{length}
+	  -; sta $0000,x; dey; bne -
+	  rts
+	endmacro
+
+	org $008000
+	  dw {square(8)}
+	  {fill($4000, $2000, $ff)}
+	  incsrc "test/include.asm"
+	  incbin "test/include.bin"
+	  {pushall}
+	  {pullall}
+You'll notice that defines no longer require quotes for multi-block values. This is because both macros and defines use a line-based parser. It means you can't declare multiple new defines on the same line (why would you?), but it gives a much nicer syntax in return.
+Macros are basically super defines. When you call fill($4000, $2000, $ff), it will actually set the defines for {addr}, {length} and {byte} prior to inlining the macro into your source code. The reason for doing this is unified syntax. Both defines and macro parameters only need one specialized syntax: {name}
+If you are worried about conflicts (eg you use really generic global define names), I'd suggest prefixing your macro arguments yourself, eg:
+Code:
+	macro test(.x, .y)
+	  lda {.x}+{.y}
+	endmacro
+Now, {square 8} looks nicer than {square(8)}, but it leads to an ambiguity when you have a no-argument macro and a define by the same name. Consider the syntax temporary for now.
+Suggestions are welcome.
