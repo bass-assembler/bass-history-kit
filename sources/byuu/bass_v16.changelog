@@ -1,0 +1,8 @@
+New features:
+* ds (data skip) command
+* write tracker tool
+* array support
+* string concatenation support
+* file exists+size built-ins
+* output file read support
+* strings, characters, and maps now support \' and \" escaping
