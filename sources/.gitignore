@@ -2,3 +2,4 @@ archives.txt
 archive_releases.txt
 *.version
 *.date
+*.hash
