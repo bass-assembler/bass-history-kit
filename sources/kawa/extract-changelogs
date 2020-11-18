@@ -295,7 +295,8 @@ if __name__ == "__main__":
     with open(sys.argv[1], "r") as handle:
         for version, changelog in sorted(split_changelogs(handle)):
             changelog_path = version + ".changelog"
-            print("", version, changelog_path)
+            # Kawa's changelogs do not have timestamps. :/
+            print("-", version, changelog_path)
 
             with open(changelog_path, "w") as changelog_handle:
                 changelog_handle.write(changelog)
