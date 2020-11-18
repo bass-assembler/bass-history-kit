@@ -1,5 +1,6 @@
 archives.txt
 archive_releases.txt
+changelog_releases.txt
 *.version
 *.date
 *.hash
