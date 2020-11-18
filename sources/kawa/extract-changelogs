@@ -1,0 +1,301 @@
+#!/usr/bin/env python3
+import html.parser
+import io
+import re
+import sys
+import textwrap
+
+
+# Kawa grepped for 'bass_v' and picked up some mentions of bass_v13 and bass_v14
+# that were repoosts, not actual release announcements, so this regex should get
+# all the actual releases.
+RELEASE_LINK_RE = re.compile(r"byuu.org/temp/(bass_v\d+([r.b]\d+)?)\.tar")
+
+WIDTH=72
+
+
+class InlineElementStack:
+
+    def __init__(self):
+        self.wrappers = []
+        self.content = ""
+
+    def _content_visible(self):
+        return all(not hidden for (_, _, hidden) in self.wrappers)
+
+    def inline_start(self, prefix="", suffix="", hidden=False):
+        self.wrappers.append((prefix, suffix, hidden))
+        if self._content_visible():
+            self.content += prefix
+
+        #print("wrappers:", self.wrappers, file=sys.stderr)
+
+    def write(self, content):
+        if self._content_visible():
+            self.content += content
+
+    def inline_end(self):
+        _, suffix, hidden = self.wrappers.pop()
+        if self._content_visible() and not hidden:
+            self.content += suffix
+
+        #print("wrappers:", self.wrappers, file=sys.stderr)
+
+    def break_block(self):
+        temp_wrappers = []
+        while self.wrappers:
+            prefix, suffix, hidden = self.wrappers.pop()
+            if self._content_visible() and not hidden:
+                self.content += suffix
+            temp_wrappers.append((prefix, suffix, hidden))
+
+        res = self.content
+
+        self.content = ""
+
+        while temp_wrappers:
+            prefix, suffix, hidden = temp_wrappers.pop()
+            if self._content_visible() and not hidden:
+                self.content += prefix
+            self.wrappers.append((prefix, suffix, hidden))
+
+        #print("wrappers:", self.wrappers, file=sys.stderr)
+        return res
+
+
+class BlockElementStack:
+
+    def __init__(self, sink):
+        self.sink = sink
+        self.prefixes = []
+        self.inline_content = InlineElementStack()
+
+    def block_start(self, initial_indent="", subsequent_indent="", hidden=False):
+        self.flush_block()
+        self.prefixes.append((initial_indent, subsequent_indent, hidden))
+
+    def inline_start(self, prefix="", suffix="", hidden=False):
+        self.inline_content.inline_start(prefix, suffix, hidden)
+
+    def write(self, content):
+        self.inline_content.write(content)
+
+    def inline_end(self):
+        self.inline_content.inline_end()
+
+    def flush_block(self, force_new_line=False):
+        # Strip tabs and spaces, but not non-breaking spaces,
+        # which phpBB likes to use to indent code-blocks.
+        content = self.inline_content.break_block().strip(" \t")
+
+        if content == "" and not force_new_line:
+            # Nothing to flush.
+            return
+
+        # We don't need gratuitous non-ASCII characters floating around.
+        content = content.replace("\N{NO-BREAK SPACE}", " ")
+
+        current_initial_indent = ""
+        current_subsequent_indent = ""
+        hidden = False
+
+        for each in self.prefixes:
+            current_initial_indent += each[0]
+            current_subsequent_indent += each[1]
+            hidden = hidden or each[2]
+
+        if not hidden:
+            wrapper = textwrap.TextWrapper(
+                width=WIDTH,
+                initial_indent=current_initial_indent,
+                subsequent_indent=current_subsequent_indent,
+            )
+            self.sink.write(wrapper.fill(content))
+            self.sink.write("\n")
+
+    def block_end(self):
+        self.flush_block()
+        self.prefixes.pop()
+
+
+class Renderer(html.parser.HTMLParser):
+
+    def __init__(self, sink, **kwargs):
+        super().__init__(**kwargs)
+
+        self.blocks = BlockElementStack(sink)
+
+    def handle_starttag(self, tag, attrs):
+        #print("start tag", tag, "attrs", attrs, file=sys.stderr)
+        attrs = dict(attrs)
+
+        if tag == "br":
+            self.blocks.flush_block(force_new_line=True)
+
+        elif tag == "hr":
+            self.blocks.block_start()
+            self.blocks.write("-" * WIDTH)
+            self.blocks.block_end()
+
+        elif tag == "a":
+            self.blocks.inline_start()
+
+        elif tag == "img":
+            alt = attrs.get("alt", "[image]")
+            self.blocks.write(alt)
+
+        elif tag == "pre":
+            self.blocks.inline_start("`", "`")
+
+        elif tag == "div":
+            classes = set(attrs.get("class", "").split())
+            style = attrs.get("style", "")
+
+            if classes & {"postbody", "bb-wrapper"}:
+                # An ordinary, forgettable div.
+                self.blocks.block_start()
+            elif classes & {"quotetitle"}:
+                # The "quote" heading above a block-quote.
+                self.blocks.block_start(hidden=True)
+            elif classes & {"quotecontent"}:
+                # The text of a block-quote.
+                self.blocks.block_start(
+                    initial_indent="> ",
+                    subsequent_indent="> ",
+                )
+            elif classes & {"codetitle"}:
+                # The "Code" heading above a code block.
+                self.blocks.block_start(hidden=True)
+            elif classes & {"codecontent"}:
+                # The text of a code block.
+                self.blocks.block_start(
+                    initial_indent="    ",
+                    subsequent_indent="    ",
+                )
+            elif style == "margin-left: 2em;":
+                # Some block-quotey things in bsnes_thread.html
+                self.blocks.block_start(
+                    initial_indent="    ",
+                    subsequent_indent="    ",
+                )
+            else:
+                self.blocks.block_start()
+                print("start div", attrs, file=sys.stderr)
+
+        elif tag == "td":
+            classes = set(attrs.get("class", "").split())
+
+            if classes & {"code"}:
+                # The text of a code block in bsnes_thread.html.
+                self.blocks.block_start(
+                    initial_indent="    ",
+                    subsequent_indent="    ",
+                )
+            elif classes & {"quote"}:
+                # The text of a block-quote in bsnes_thread.html.
+                self.blocks.block_start(
+                    initial_indent="> ",
+                    subsequent_indent="> ",
+                )
+            else:
+                #print("Ignoring unsupported table markup", file=sys.stderr)
+                self.blocks.block_start()
+
+        elif tag in {"table", "tbody", "tr", "td"}:
+            #print("Ignoring unsupported table markup", file=sys.stderr)
+            self.blocks.block_start()
+
+        elif tag in {"b", "strong"}:
+            self.blocks.inline_start("**", "**")
+
+        elif tag in {"i", "em"}:
+            self.blocks.inline_start("_", "_")
+
+        elif tag == "s":
+            self.blocks.inline_start("~~", "~~")
+
+        elif tag == "ul":
+            self.blocks.block_start()
+
+        elif tag == "li":
+            self.blocks.block_start(
+                initial_indent="  - ",
+                subsequent_indent="    ",
+            )
+
+        elif tag == "span":
+            classes = set(attrs.get("class", "").split())
+            style = attrs.get("style", "")
+
+            if classes & {"genmed", "gensmall"}:
+                # "genmed" is the "SomeUser wrote" heading of blockquotes in
+                # bsnes_thread.html, while "gensmall" is the "Last edited"
+                # footer.
+                self.blocks.inline_start(hidden=True)
+            elif classes & {"postbody"}:
+                self.blocks.inline_start()
+            elif style.startswith("font-weight: bold"):
+                self.blocks.inline_start("**", "**")
+            elif style.startswith("font-style: italic"):
+                self.blocks.inline_start("_", "_")
+            elif style.startswith("text-decoration: underline"):
+                self.blocks.inline_start("_", "_")
+            elif style.startswith("font-size: ") or style.startswith("color: "):
+                # Various attempts to empahsise or de-emphasise; we don't care.
+                self.blocks.inline_start()
+            else:
+                self.blocks.inline_start()
+                print("start span", attrs, file=sys.stderr)
+
+        else:
+            print("start tag", tag, "attrs", attrs, file=sys.stderr)
+
+    def handle_endtag(self, tag):
+        #print("end tag", tag, file=sys.stderr)
+        if tag in {"br", "hr", "img"}:
+            pass
+        elif tag in {"a", "span", "b", "strong", "i", "em", "s", "pre"}:
+            self.blocks.inline_end()
+        elif tag in {"div", "ul", "li"}:
+            self.blocks.block_end()
+        elif tag in {"table", "tbody", "tr", "td"}:
+            #print("Ignoring unsupported table markup", file=sys.stderr)
+            self.blocks.block_end()
+        else:
+            print("end tag", tag, file=sys.stderr)
+
+    def handle_data(self, data):
+        self.blocks.write(data)
+
+    def close(self):
+        super().close()
+        self.blocks.flush_block()
+
+
+def split_changelogs(handle):
+    for line in handle:
+        m = RELEASE_LINK_RE.search(line)
+        if m is None:
+            continue
+        version = m.group(1)
+        changelog_path = "{0}.changelog".format(version)
+
+        # Each line is C:\path\to\stuff:content
+        _drive, _path, content = line.split(":", 2)
+
+        sink = io.StringIO()
+        renderer = Renderer(sink)
+        renderer.feed(content)
+        renderer.close()
+
+        yield version, sink.getvalue()
+
+
+if __name__ == "__main__":
+    with open(sys.argv[1], "r") as handle:
+        for version, changelog in sorted(split_changelogs(handle)):
+            changelog_path = version + ".changelog"
+            print("", version, changelog_path)
+
+            with open(changelog_path, "w") as changelog_handle:
+                changelog_handle.write(changelog)
