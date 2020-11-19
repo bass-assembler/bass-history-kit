@@ -10,7 +10,7 @@ class ChangelogRelease(typing.NamedTuple):
 
 def iter_changelog_releases(handle) -> typing.Iterable[ChangelogRelease]:
     for line in handle:
-        date, version, path = line.split(" ")
+        date, version, path = line.strip().split(" ")
         if date == "-":
             date = None
         else:
@@ -27,7 +27,7 @@ class ArchiveRelease(typing.NamedTuple):
 
 def iter_archive_releases(handle) -> typing.Iterable[ArchiveRelease]:
     for line in handle:
-        date, version, path = line.split(" ")
+        date, version, path = line.strip().split(" ")
         date = datetime.datetime.fromisoformat(date)
 
         yield ArchiveRelease(date, version, path)
