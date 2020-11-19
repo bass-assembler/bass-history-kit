@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+import datetime
+import sys
+import typing
+
+class ChangelogRelease(typing.NamedTuple):
+    date: typing.Optional[datetime.datetime]
+    version: str
+    path: str
+
+def iter_changelog_releases(handle) -> typing.Iterable[ChangelogRelease]:
+    for line in handle:
+        date, version, path = line.split(" ")
+        if date == "-":
+            date = None
+        else:
+            date = datetime.datetime.fromisoformat(date)
+
+        yield ChangelogRelease(date, version, path)
+
+
+class ArchiveRelease(typing.NamedTuple):
+    date: datetime.datetime
+    version: str
+    path: str
+
+
+def iter_archive_releases(handle) -> typing.Iterable[ArchiveRelease]:
+    for line in handle:
+        date, version, path = line.split(" ")
+        date = datetime.datetime.fromisoformat(date)
+
+        yield ArchiveRelease(date, version, path)
+
+
+class CombinedRelease(typing.NamedTuple):
+    date: typing.Optional[datetime.datetime]
+    version: str
+    changelog_path: typing.Optional[str]
+    archive_path: typing.Optional[str]
+
+    @classmethod
+    def from_changelog_release(
+        cls,
+        changelog_release: ChangelogRelease,
+    ):
+        return cls(
+            changelog_release.date,
+            changelog_release.version,
+            changelog_release.path,
+            None,
+        )
+
+    @classmethod
+    def from_archive_release(
+        cls,
+        archive_release: ArchiveRelease,
+    ):
+        return cls(
+            archive_release.date,
+            archive_release.version,
+            None,
+            archive_release.path,
+        )
+
+    @classmethod
+    def combine(
+        cls,
+        changelog_release: ChangelogRelease,
+        archive_release: ArchiveRelease,
+    ):
+        assert changelog_release.version == archive_release.version
+        return cls(
+            archive_release.date,
+            archive_release.version,
+            changelog_release.path,
+            archive_release.path,
+        )
+
+    def __str__(self) -> str:
+        return " ".join([
+            "-" if self.date is None else self.date.isoformat(),
+            self.version,
+            "-" if self.changelog_path is None else self.changelog_path,
+            "-" if self.archive_path is None else self.archive_path,
+        ])
+
+
+ONEDAY = datetime.timedelta(days=1)
+
+def merge_releases(
+    changelog_releases: typing.Iterable[ChangelogRelease],
+    archive_releases: typing.Iterable[ArchiveRelease],
+) -> typing.Iterable[CombinedRelease]:
+    curr_changelog_release = next(changelog_releases, None)
+    curr_archive_release = next(archive_releases, None)
+
+    # As long as we still have *some* releases...
+    while not (curr_changelog_release is None and curr_archive_release is None):
+        if curr_archive_release is None:
+            # We don't have any more archives, just changelogs.
+            for curr_changelog_release in changelog_releases:
+                yield CombinedRelease.from_changelog_release(
+                    curr_changelog_release,
+                )
+            return
+
+        if curr_changelog_release is None:
+            # We don't have any more changelogs, just archives.
+            for curr_archive_release in archive_releases:
+                yield CombinedRelease.from_archive_release(
+                    curr_archive_release,
+                )
+            return
+
+        # At this point, we have both a changelog and an archive.
+
+        # If the changelog is older, send it out on its own.
+        if curr_changelog_release.version < curr_archive_release.version:
+            yield CombinedRelease.from_changelog_release(
+                curr_changelog_release,
+            )
+            curr_changelog_release = next(changelog_releases, None)
+            continue
+
+        # If the archive is older, send it out on its own.
+        if curr_changelog_release.version > curr_archive_release.version:
+            yield CombinedRelease.from_archive_release(
+                curr_archive_release,
+            )
+            curr_archive_release = next(archive_releases, None)
+            continue
+
+        # At this point, the changelog and archive seem to represent the same
+        # release. We will assume the dates are close enough.
+        yield CombinedRelease.combine(
+            curr_changelog_release,
+            curr_archive_release,
+        )
+        curr_changelog_release = next(changelog_releases, None)
+        curr_archive_release = next(archive_releases, None)
+
+
+if __name__ == "__main__":
+    with open(sys.argv[1]) as raw_changelogs, open(sys.argv[2]) as raw_archives:
+        changelog_releases = iter_changelog_releases(raw_changelogs)
+        archive_releases = iter_archive_releases(raw_archives)
+
+        for combined_release in merge_releases(
+            changelog_releases,
+            archive_releases,
+        ):
+            print(combined_release)
