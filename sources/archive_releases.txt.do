@@ -5,6 +5,7 @@ redo-ifchange $(
     sed -e 's/$/.version/' ./archives.txt
     sed -e 's/$/.date/'    ./archives.txt
     sed -e 's/$/.hash/'    ./archives.txt
+    sed -e 's/$/.repack/'  ./archives.txt
 )
 
 last_archive=""
@@ -37,7 +38,7 @@ cat ./archives.txt |
             fi
         # Otherwise, this is a new release, so print it and update our state.
         else
-            printf "%s %s %s\n" "$date" "$version" "$archive"
+            printf "%s %s %s\n" "$date" "$version" "$archive.repack"
             last_archive="$archive"
             last_version="$version"
             last_hash="$hash"
