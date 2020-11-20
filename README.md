@@ -9,6 +9,7 @@ that repository only goes back to v14,
 so exploring the development history before that point
 requires a separate solution.
 
+[byuu]: https://byuu.org/about
 [arm9bass]: https://github.com/ARM9/bass
 
 This repository contains the surviving release archives and changelogs,
