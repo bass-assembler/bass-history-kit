@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+import collections
+import datetime
+import os
+import os.path
+import re
+import shutil
+import sys
+import tarfile
+import typing
+
+FULL_RELEASE_RE = re.compile(r"v\d+[a-z]?$")
+
+class Release(typing.NamedTuple):
+    date: typing.Optional[datetime.datetime]
+    version: str
+    changelog: typing.Optional[str]
+    archive: typing.Optional[str]
+
+def iter_releases():
+    with open("sources/combined_releases.txt", "r") as handle:
+        for line in handle:
+            date, version, changelog_path, archive = line.strip().split(" ")
+            date = None if date == "-" else datetime.datetime.fromisoformat(date)
+            archive = None if archive == "-" else "sources/" + archive
+
+            if changelog_path != "-":
+                with open("sources/" + changelog_path, "r") as changelog_handle:
+                    changelog = changelog_handle.read().strip()
+            else:
+                changelog = None
+
+            yield Release(date, version, changelog, archive)
+
+def format_commit_message(release):
+        message_parts = []
+
+        if release.version.startswith("_missing"):
+            message_parts.append("Update to unreleased version.")
+        else:
+            message_parts.append(
+                "Update to {} release.".format(release.version.replace("_", " "))
+            )
+
+        if release.changelog is None:
+            message_parts.append("[No changelog available]")
+        else:
+            message_parts.append(release.changelog)
+
+        if release.archive is None:
+            message_parts.append("[No archive available]")
+
+        return "\n\n".join(message_parts).encode("utf-8")
+
+class ArchiveFile(typing.NamedTuple):
+    path: str
+    size: int
+    handle: typing.BinaryIO
+
+def iter_files(archive):
+    with tarfile.open(archive) as archive:
+        for info in iter(archive.next, None):
+            if not info.isfile():
+                # Git doesn't care about anything but files
+                continue
+
+            yield ArchiveFile(
+                path=info.name,
+                size=info.size,
+                handle=archive.extractfile(info),
+            )
+
+def write(bytes):
+    sys.stdout.buffer.write(bytes)
+
+def produce_history(releases):
+    last_timestamp = 0
+
+    for mark, release in enumerate(releases, 1):
+        write(b"progress Committing version %s\n" %
+            release.version.encode("utf-8")
+        )
+
+        if release.date is None:
+            timestamp = last_timestamp
+        else:
+            timestamp = release.date.timestamp()
+
+        write(b"commit refs/heads/history\n")
+        write(b"mark :%d\n" % mark)
+        write(b"committer byuu <byuu@byuu.org> %d +0000\n" % timestamp)
+
+        message = format_commit_message(release)
+
+        write(b"data %d\n" % len(message))
+        write(message)
+        write(b"\n")
+
+        if mark > 1:
+            write(b"from :%d\n" % (mark - 1))
+
+        if release.archive is None:
+            # We don't know what this release looked like, let's leave things
+            # alone.
+            continue
+
+        # We're going to replace the previous release with a new one.
+        write(b"deleteall\n")
+
+        for each in iter_files(release.archive):
+            write(b"M 100644 inline %s\n" % each.path.encode("utf-8"))
+            write(b"data %d\n" % each.size)
+            shutil.copyfileobj(each.handle, sys.stdout.buffer)
+            write(b"\n")
+
+        m = FULL_RELEASE_RE.search(release.version)
+        if m is not None:
+            write(b"reset refs/tags/%s\n" % m.group().encode("utf-8"))
+            write(b"from :%d\n" % mark)
+
+        last_timestamp = release.date.timestamp()
+
+def main(args):
+    os.chdir(os.path.dirname(args[0]))
+
+    produce_history(iter_releases())
+
+    write(b"progress Adding decorations\n")
+    write(b"commit refs/heads/master\n")
+    write(b"committer nobody <nobody@example.org> %d +0000\n" %
+        datetime.datetime.utcnow().timestamp()
+    )
+
+    message = b"Add README."
+
+    write(b"data %d\n" % len(message))
+    write(message)
+    write(b"\n")
+
+    with open("decorations/README.md", "rb") as handle:
+        readme_content = handle.read()
+
+    write(b"M 100644 inline README.md\n")
+    write(b"data %d\n" % len(readme_content))
+    write(readme_content)
+    write(b"\n")
+
+    write(b"done\n")
+
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
