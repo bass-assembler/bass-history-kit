@@ -94,21 +94,21 @@ using the `git replace` tool.
 Follow the regular building steps above to create a `bass-history` repository.
 Then:
 
- 1. Check out the ARM9 bass repo:
+ 1. Check out the ARM9 bass repo (if you don't already have a copy):
 
         $ cd ..
-        $ git clone https://github.com/ARM9/bass.git
+        $ git clone https://github.com/ARM9/bass.git 
         $ cd bass
 
  1. Fetch the `v14` tag from the bass-history repo, which automatically
-    fetches all the tags and history leading up to that point:
+    fetches all the history leading up to that point:
 
-        $ git fetch ../bass-history tag v14
+        $ git fetch ../bass-history v14
 
- 1. Tell git to replace the oldest commit in the higan repo with the newest
-    commit on the 'history' branch:
+ 1. Tell git to add the fetched commit
+    as the parent of the oldest commit in ARM9's repository:
 
-        $ git replace 6da8424 graft-point
+        $ git replace --graft 6da8424 FETCH_HEAD
 
 Now commands like `git log` should show you the complete bass development
 history from the oldest surviving changes up until the present day!
