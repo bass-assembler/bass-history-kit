@@ -24,7 +24,11 @@ so go there if you want to contribute changes or suggestions.
 Repository layout
 =================
 
-The `master` branch only contains this README, and can be ignored.
+The `master` branch only contains this README and LICENSE,
+and can be ignored.
+The licence applies to all versions of bass in this repository,
+but since it was never included in a release archive,
+it has not been included in the historical commits.
 
 The `history` branch contains the full development history reconstructed by
 [the bass history kit][kit].

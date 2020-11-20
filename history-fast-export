@@ -131,7 +131,7 @@ def main(args):
         datetime.datetime.utcnow().timestamp()
     )
 
-    message = b"Add README."
+    message = b"Add README and LICENSE."
 
     write(b"data %d\n" % len(message))
     write(message)
@@ -143,6 +143,14 @@ def main(args):
     write(b"M 100644 inline README.md\n")
     write(b"data %d\n" % len(readme_content))
     write(readme_content)
+    write(b"\n")
+
+    with open("decorations/LICENSE", "rb") as handle:
+        license_content = handle.read()
+
+    write(b"M 100644 inline LICENSE\n")
+    write(b"data %d\n" % len(license_content))
+    write(license_content)
     write(b"\n")
 
     write(b"done\n")
