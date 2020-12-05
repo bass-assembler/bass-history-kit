@@ -98,6 +98,9 @@ def merge_releases(
     # As long as we still have *some* releases...
     while not (curr_changelog_release is None and curr_archive_release is None):
         if curr_archive_release is None:
+            yield CombinedRelease.from_changelog_release(
+                curr_changelog_release,
+            )
             # We don't have any more archives, just changelogs.
             for curr_changelog_release in changelog_releases:
                 yield CombinedRelease.from_changelog_release(
@@ -106,6 +109,9 @@ def merge_releases(
             return
 
         if curr_changelog_release is None:
+            yield CombinedRelease.from_archive_release(
+                curr_archive_release,
+            )
             # We don't have any more changelogs, just archives.
             for curr_archive_release in archive_releases:
                 yield CombinedRelease.from_archive_release(
