@@ -1,0 +1,2 @@
+Added "copy" and "assert" commands.
+Fixed nall::string::replace().
