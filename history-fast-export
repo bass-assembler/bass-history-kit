@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import collections
 import datetime
+import io
 import os
 import os.path
 import re
@@ -58,17 +59,37 @@ class ArchiveFile(typing.NamedTuple):
     handle: typing.BinaryIO
 
 def iter_files(archive):
+    empty_dirs = set()
+
     with tarfile.open(archive) as archive:
         for info in iter(archive.next, None):
-            if not info.isfile():
-                # Git doesn't care about anything but files
-                continue
+            # This path's's parent clearly isn't an empty directory.
+            empty_dirs.discard(os.path.dirname(info.name))
 
-            yield ArchiveFile(
-                path=info.name,
-                size=info.size,
-                handle=archive.extractfile(info),
-            )
+            if info.isdir():
+                # This directory may be empty.
+                empty_dirs.add(info.name)
+
+            elif info.isfile():
+                yield ArchiveFile(
+                    path=info.name,
+                    size=info.size,
+                    handle=archive.extractfile(info),
+                )
+
+            # Git doesn't care about anything else.
+
+    for dir in empty_dirs:
+        if dir.endswith("/obj") or dir.endswith("/out"):
+            gitignore=b"*\n!.gitignore\n"
+        else:
+            gitignore=b""
+
+        yield ArchiveFile(
+            path=dir + "/.gitignore",
+            size=len(gitignore),
+            handle=io.BytesIO(gitignore),
+        )
 
 def write(bytes):
     sys.stdout.buffer.write(bytes)
