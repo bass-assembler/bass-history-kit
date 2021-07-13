@@ -1,7 +1,7 @@
 redo-ifchange \
     tukuyomi/changelog_list.txt \
     kawa/changelog_list.txt \
-    byuu/changelog_list.txt
+    Near/changelog_list.txt
 
 path_prefix() {
     cat "$1"/changelog_list.txt |
@@ -14,4 +14,4 @@ path_prefix() {
 # so we can just hard-code the order here.
 path_prefix tukuyomi
 path_prefix kawa
-path_prefix byuu
+path_prefix Near

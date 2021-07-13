@@ -109,7 +109,10 @@ def produce_history(releases):
 
         write(b"commit refs/heads/history\n")
         write(b"mark :%d\n" % mark)
-        write(b"committer byuu <byuu@byuu.org> %d +0000\n" % timestamp)
+        write(b"committer %s %d +0000\n" % (
+            b"Near <77224854+near-san@users.noreply.github.com>",
+            timestamp,
+        ))
 
         message = format_commit_message(release)
 

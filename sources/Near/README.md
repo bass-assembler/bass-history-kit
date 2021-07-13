@@ -1,6 +1,6 @@
-Source material from byuu
+Source material from Near
 =========================
 
 The files in this directory
 (with the exception of this README and `changelog_list.txt`)
-were provided by directly by byuu via https://twitter.com/byuu_san
+were provided by directly by Near

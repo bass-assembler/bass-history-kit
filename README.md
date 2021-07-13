@@ -1,7 +1,7 @@
 bass history kit
 ================
 
-bass is [byuu]'s cross-assembler,
+bass is [Near]'s cross-assembler,
 which he used for making SNES homebrew and ROM hacks,
 among other things.
 While official development is now done [in git][arm9bass],
@@ -9,7 +9,7 @@ that repository only goes back to v14,
 so exploring the development history before that point
 requires a separate solution.
 
-[byuu]: https://byuu.org/about
+[Near]: https://near.sh/
 [arm9bass]: https://github.com/ARM9/bass
 
 This repository contains the surviving release archives and changelogs,
@@ -21,7 +21,7 @@ Results
 =======
 
 If you can't use this kit yourself, or if you'd rather not, an example history
-repository is available at https://github.com/byuu/bass-history/
+repository is available at https://github.com/bass-assembler/bass-history/
 
 Note that the pre-built repository may have been built by an older version of
 the kit, and so may not be as accurate as it could be.
@@ -54,7 +54,7 @@ How to build your own `bass-history` repository:
 
  1. Check out this repository somewhere:
 
-        $ git clone https://github.com/byuu/bass-history-kit.git
+        $ git clone https://github.com/bass-assembler/bass-history-kit.git
         $ cd bass-history-kit
 
  1. Run the preparation script, to analyse and collate the sources:

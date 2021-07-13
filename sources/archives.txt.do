@@ -1,7 +1,7 @@
 redo-always
 
 printf "%s\n" \
-	byuu/bass_*.tar.xz \
+	Near/bass_*.tar.xz \
 	krom/bass_*.tar.bz2 \
 	krom/bass_*.tar.xz \
 	krom/bass_*-source.7z \

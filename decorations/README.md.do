@@ -10,7 +10,7 @@ of the bass cross-assembler.
 It is built from the archives and changelogs
 in [the bass-history-kit repository][kit].
 
-[kit]: https://github.com/byuu/bass-history-kit/
+[kit]: https://github.com/bass-assembler/bass-history-kit/
 
 This repository is not stable,
 and may be rebuilt from scratch
