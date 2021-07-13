@@ -1,4 +1,4 @@
-Source material from byuu
+Source material from Kawa
 =========================
 
 The `./bass_v_resuts.txt` file in this directory
