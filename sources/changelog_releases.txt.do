@@ -1,7 +1,8 @@
 redo-ifchange \
     tukuyomi/changelog_list.txt \
     kawa/changelog_list.txt \
-    Near/changelog_list.txt
+    Near/changelog_list.txt \
+    Screwtape/changelog_list.txt
 
 path_prefix() {
     cat "$1"/changelog_list.txt |
@@ -15,3 +16,4 @@ path_prefix() {
 path_prefix tukuyomi
 path_prefix kawa
 path_prefix Near
+path_prefix Screwtape
